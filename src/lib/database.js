@@ -29,15 +29,26 @@ export function getDatabaseAddressFromURL() {
 
   if (dbAddress) {
     console.log('📱 Magic link detected:', dbAddress);
-
-    // Clean URL (remove parameter from browser history)
-    const cleanURL = window.location.origin + window.location.pathname;
-    window.history.replaceState({}, document.title, cleanURL);
-
     return dbAddress;
   }
 
   return null;
+}
+
+/**
+ * Clears the database parameter from URL
+ * Should be called after successfully connecting via magic link
+ */
+export function clearDatabaseFromURL() {
+  if (typeof window === 'undefined') return;
+
+  const params = new URLSearchParams(window.location.search);
+  if (params.has('db')) {
+    // Use replaceState to clean URL without triggering navigation
+    const cleanURL = window.location.origin + window.location.pathname;
+    window.history.replaceState({}, document.title, cleanURL);
+    console.log('🧹 Cleaned database parameter from URL');
+  }
 }
 
 /**
@@ -70,6 +81,7 @@ export async function openIntentionsDatabase(orbitdb, identity, identities) {
 
     try {
       // Connect to the database from magic link
+      // Use longer timeout for initial connection (30 seconds)
       database = await Promise.race([
         orbitdb.open(urlAddress, {
           type: 'documents',
@@ -78,28 +90,42 @@ export async function openIntentionsDatabase(orbitdb, identity, identities) {
         }),
         new Promise((_, reject) =>
           setTimeout(
-            () => reject(new Error('Database open timeout after 15 seconds')),
-            15000
+            () => reject(new Error('Database open timeout after 30 seconds')),
+            30000
           )
         )
       ]);
 
       // Store the database address for future use
       localStorage.setItem('syncengine-database-address', urlAddress);
+
+      // Clear URL parameter after successful connection
+      clearDatabaseFromURL();
+
       console.log('✅ Successfully joined via invitation!');
+      console.log('💾 Database address stored for future connections');
     } catch (error) {
-      console.warn('⚠️ Failed to join via magic link:', error.message);
-      // Continue to try stored address or create new
+      console.error('❌ Failed to join via magic link:', error.message);
+      console.log('💡 Tip: Make sure the person who shared the link has their device online');
+
+      // Don't fall back to stored address - this prevents joining wrong database
+      // Instead, clear the bad URL parameter and throw error
+      clearDatabaseFromURL();
+      throw new Error(
+        'Failed to connect to shared database. The database owner may be offline. ' +
+        'Please ask them to make sure their device is online and try the link again.'
+      );
     }
   }
 
-  // Try stored address if magic link failed or wasn't present
-  if (!database && storedAddress) {
+  // Try stored address if magic link wasn't present
+  if (!database && storedAddress && !urlAddress) {
     console.log('📍 Found stored database address:', storedAddress);
     console.log('🔗 Connecting to existing shared database...');
 
     try {
       // Connect to the existing database using its address
+      // Use longer timeout (30 seconds) for reconnection
       database = await Promise.race([
         orbitdb.open(storedAddress, {
           type: 'documents',
@@ -108,8 +134,8 @@ export async function openIntentionsDatabase(orbitdb, identity, identities) {
         }),
         new Promise((_, reject) =>
           setTimeout(
-            () => reject(new Error('Database open timeout after 15 seconds')),
-            15000
+            () => reject(new Error('Database open timeout after 30 seconds')),
+            30000
           )
         )
       ]);
@@ -231,12 +257,14 @@ export async function loadIntentions(database, isNewDatabase = false) {
       return [];
     }
 
+    // Increase timeout to 30 seconds for initial load
+    // This gives more time for P2P sync to complete
     const allIntentions = await Promise.race([
       database.all(),
       new Promise((_, reject) =>
         setTimeout(
-          () => reject(new Error('Database.all() timeout after 10 seconds')),
-          10000
+          () => reject(new Error('Database.all() timeout after 30 seconds')),
+          30000
         )
       )
     ]);
@@ -251,6 +279,7 @@ export async function loadIntentions(database, isNewDatabase = false) {
     return intentions;
   } catch (error) {
     console.error('❌ Failed to load intentions:', error);
+    console.log('💡 Database may be syncing - try refreshing in a moment');
     // If loading fails, return empty array rather than throwing
     // This prevents authentication from failing completely
     console.log('⚠️ Returning empty array due to load error');

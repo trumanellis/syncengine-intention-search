@@ -72,6 +72,7 @@
   let loading = false;
   let status = 'initializing';
   let webAuthnSupported = false;
+  let authError = null;
 
   // ML Model
   let modelLoaded = false;
@@ -198,6 +199,7 @@
     try {
       loading = true;
       status = 'authenticating';
+      authError = null;
 
       // Setup OrbitDB
       orbitdbInstances = await setupOrbitDB(credential);
@@ -231,6 +233,7 @@
     } catch (error) {
       console.error('Authentication failed:', error);
       status = 'auth-failed';
+      authError = error.message;
       loading = false;
     }
   }
@@ -655,6 +658,16 @@
         {#if !webAuthnSupported}
           <p class="error-text">WebAuthn not supported in this browser</p>
         {/if}
+
+        {#if authError}
+          <div class="error-banner">
+            <p class="error-title">Connection Failed</p>
+            <p class="error-message">{authError}</p>
+            <button class="retry-button" on:click={authenticate}>
+              Try Again
+            </button>
+          </div>
+        {/if}
       </div>
     {/if}
 
@@ -968,6 +981,50 @@
     color: var(--red);
     font-size: 0.875rem;
     margin: 0;
+  }
+
+  .error-banner {
+    background: rgba(255, 51, 102, 0.1);
+    border: 1px solid rgba(255, 51, 102, 0.3);
+    border-radius: 8px;
+    padding: 1.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    text-align: left;
+  }
+
+  .error-title {
+    font-size: 1rem;
+    font-weight: 500;
+    color: var(--red);
+    margin: 0;
+    font-family: var(--font-mono);
+  }
+
+  .error-message {
+    font-size: 0.875rem;
+    color: var(--white);
+    margin: 0;
+    line-height: 1.5;
+  }
+
+  .retry-button {
+    background: transparent;
+    border: 1px solid var(--red);
+    border-radius: 6px;
+    padding: 0.75rem 1.5rem;
+    font-size: 0.875rem;
+    color: var(--red);
+    font-family: var(--font-mono);
+    cursor: pointer;
+    transition: all 0.3s ease;
+    align-self: flex-start;
+  }
+
+  .retry-button:hover {
+    background: rgba(255, 51, 102, 0.1);
+    border-color: var(--red);
   }
 
   /* ===== Search Screen - Single Layout ===== */
