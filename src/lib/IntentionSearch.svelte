@@ -399,8 +399,8 @@
 
       const newIntention = await createIntention(database, event.detail, credential);
 
-      // Reload intentions
-      allIntentions = await loadIntentions(database);
+      // Add to local state immediately (optimistic update)
+      allIntentions = [newIntention, ...allIntentions];
 
       // Navigate to detail page with the new intention
       selectedIntention = newIntention;
@@ -410,9 +410,22 @@
       await handleMakeActive({ detail: { intentionId: newIntention.intentionId } });
 
       status = 'created';
+
+      // Sync in background (non-blocking)
+      syncFromOrbitDB();
     } catch (error) {
       console.error('Failed to create intention:', error);
       status = 'create-failed';
+
+      // Show user-friendly error message
+      if (error.message.includes('timeout') || error.message.includes('Network timeout')) {
+        alert(error.message);
+        // Even on timeout, the intention is cached, so reload from cache
+        const { loadIntentionsFromCache } = await import('./database.js');
+        allIntentions = await loadIntentionsFromCache();
+      } else {
+        alert('Failed to create intention: ' + error.message);
+      }
     } finally {
       loading = false;
     }

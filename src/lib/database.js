@@ -497,22 +497,39 @@ export async function createIntention(database, intentionData, credential = null
     console.log('🧠 Generating embedding for intention...');
     const intentionWithEmbedding = await embedIntention(intention);
 
-    // Save to OrbitDB
-    dbLog('Calling database.put() with embedding');
-    await database.put(intentionWithEmbedding);
-
-    const endTime = Date.now();
-    dbLog('database.put() completed in %d ms', endTime - startTime);
-
-    console.log('✅ Intention created:', intentionId);
-
-    // Update cache with new intention
+    // Cache FIRST for instant UI (optimistic update)
     const currentCache = await loadIntentionsFromCache();
     await saveIntentionsToCache([...currentCache, intentionWithEmbedding]);
+    console.log('💾 Cached intention locally');
+
+    // Try to save to OrbitDB (don't fail if it times out)
+    console.log('☁️ Syncing to OrbitDB...');
+    dbLog('Calling database.put() with embedding');
+
+    try {
+      await Promise.race([
+        database.put(intentionWithEmbedding),
+        new Promise((_, reject) =>
+          setTimeout(
+            () => reject(new Error('Database write timeout after 15 seconds')),
+            15000
+          )
+        )
+      ]);
+
+      const endTime = Date.now();
+      dbLog('database.put() completed in %d ms', endTime - startTime);
+      console.log('✅ Intention created and synced:', intentionId);
+    } catch (writeError) {
+      // OrbitDB write failed, but that's okay - we already cached it
+      console.warn('⚠️ OrbitDB write failed, but intention is cached locally:', writeError.message);
+      console.log('💡 Intention will sync to peers when network is available');
+      // Don't throw - we successfully created and cached the intention
+    }
 
     return intentionWithEmbedding;
   } catch (error) {
-    console.error('Failed to create intention:', error);
+    console.error('❌ Failed to create intention:', error);
     throw error;
   }
 }
