@@ -925,7 +925,7 @@
     border: none;
     outline: none;
     font-family: var(--font-mono);
-    font-size: 3rem;
+    font-size: 1.62rem;
     font-weight: 300;
     color: #39ff14;
     caret-color: #39ff14;

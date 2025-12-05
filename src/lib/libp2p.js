@@ -78,8 +78,8 @@ export async function createLibp2pInstance() {
 export async function createHeliaInstance(libp2p) {
   return await createHelia({
     libp2p,
-    blockstore: new LevelBlockstore('./orbitdb/blocks'),
-    datastore: new LevelDatastore('./orbitdb/data'),
+    blockstore: new LevelBlockstore('syncengine/blocks'),
+    datastore: new LevelDatastore('syncengine/data'),
   });
 }
 
@@ -168,11 +168,28 @@ export async function setupOrbitDB(credential) {
   // Create OrbitDB instance
   const orbitdb = await createOrbitDBInstance(ipfs, identities, identity);
 
+  // Set up libp2p event listeners for peer monitoring
+  libp2p.addEventListener('peer:connect', (event) => {
+    console.log('🤝 Peer connected:', event.detail.toString());
+  });
+
+  libp2p.addEventListener('peer:disconnect', (event) => {
+    console.log('👋 Peer disconnected:', event.detail.toString());
+  });
+
+  // Log initial peer count
+  const peers = libp2p.getPeers();
+  console.log('👥 Connected peers:', peers.length);
+  if (peers.length > 0) {
+    console.log('   Peer IDs:', peers.map(p => p.toString().substring(0, 20) + '...'));
+  }
+
   return {
     orbitdb,
     ipfs,
     identity,
     identities,
+    libp2p,
   };
 }
 

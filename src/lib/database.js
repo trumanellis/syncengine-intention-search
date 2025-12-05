@@ -30,26 +30,66 @@ export async function openIntentionsDatabase(orbitdb, identity, identities) {
   console.log('🌍 Opening global shared database...');
   console.log('🔓 Database access: collaborative (all users can write)');
 
-  // Use a fixed global database name that all users connect to
-  const globalDatabaseName = 'syncengine-global-intentions';
+  // Check if we have a stored database address
+  const storedAddress = localStorage.getItem('syncengine-database-address');
 
-  const database = await Promise.race([
-    orbitdb.open(globalDatabaseName, {
-      type: 'documents',
-      indexBy: 'intentionId',
-      create: true,
-      sync: true,
-      accessController: IPFSAccessController({
-        write: ['*']  // Allow all users to write (collaborative database)
-      })
-    }),
-    new Promise((_, reject) =>
-      setTimeout(
-        () => reject(new Error('Database open timeout after 15 seconds')),
-        15000
+  let database;
+
+  if (storedAddress) {
+    console.log('📍 Found stored database address:', storedAddress);
+    console.log('🔗 Connecting to existing shared database...');
+
+    try {
+      // Connect to the existing database using its address
+      database = await Promise.race([
+        orbitdb.open(storedAddress, {
+          type: 'documents',
+          indexBy: 'intentionId',
+          sync: true
+        }),
+        new Promise((_, reject) =>
+          setTimeout(
+            () => reject(new Error('Database open timeout after 15 seconds')),
+            15000
+          )
+        )
+      ]);
+
+      console.log('✅ Connected to shared database');
+    } catch (error) {
+      console.warn('⚠️ Failed to connect to stored address, creating new database:', error.message);
+      // If connection fails, clear the stored address and create a new one
+      localStorage.removeItem('syncengine-database-address');
+    }
+  }
+
+  // If no stored address or connection failed, create a new database
+  if (!database) {
+    console.log('🆕 Creating new shared database...');
+    const globalDatabaseName = 'syncengine-global-intentions';
+
+    database = await Promise.race([
+      orbitdb.open(globalDatabaseName, {
+        type: 'documents',
+        indexBy: 'intentionId',
+        create: true,
+        sync: true,
+        accessController: IPFSAccessController({
+          write: ['*']  // Allow all users to write (collaborative database)
+        })
+      }),
+      new Promise((_, reject) =>
+        setTimeout(
+          () => reject(new Error('Database open timeout after 15 seconds')),
+          15000
+        )
       )
-    )
-  ]);
+    ]);
+
+    // Store the database address for future use
+    localStorage.setItem('syncengine-database-address', database.address);
+    console.log('💾 Stored database address for future connections:', database.address);
+  }
 
   console.log('✅ Database opened successfully:', {
     name: database.name,
@@ -58,6 +98,9 @@ export async function openIntentionsDatabase(orbitdb, identity, identities) {
     identityId: database.identity?.id,
     accessControllerType: database.access?.type
   });
+
+  console.log('📋 Share this address with other devices to sync:');
+  console.log('   ', database.address);
 
   // Set up database event listeners
   setupDatabaseEventListeners(database, ipfsInstance, identities);
@@ -72,60 +115,25 @@ export async function openIntentionsDatabase(orbitdb, identity, identities) {
  * @param {Object} identities - The OrbitDB identities instance
  */
 function setupDatabaseEventListeners(database, ipfs, identities) {
-  database.events.on('join', (address, entry) => {
-    console.log('🔗 Database JOIN event:', { address, entry: entry?.key });
+  database.events.on('join', (peerId, heads) => {
+    console.log('🔗 Peer joined database:', {
+      peerId: peerId?.toString().substring(0, 20) + '...',
+      heads: heads?.length || 0
+    });
   });
 
-  database.events.on('update', async (address) => {
-    console.log('🔄 Database UPDATE event:', { address });
+  database.events.on('update', async (entry) => {
+    console.log('🔄 Database UPDATE received:', {
+      hash: entry?.hash?.toString ? entry.hash.toString().substring(0, 20) + '...' : 'unknown',
+      identity: entry?.identity?.toString ? entry.identity.toString().substring(0, 20) + '...' : 'unknown'
+    });
 
-    const updateIdentityHash = address?.identity;
-    if (!updateIdentityHash) {
-      console.warn('⚠️ Update event missing identity information');
-      return;
-    }
-
-    const webAuthnDID = database.identity.id;
-    if (!webAuthnDID) {
-      console.warn('⚠️ Database missing identity information');
-      return;
-    }
-
+    // Get updated intentions count
     try {
-      const { verifyDatabaseUpdate } = await import('./verification.js');
-      const verification = await verifyDatabaseUpdate(
-        database,
-        updateIdentityHash,
-        webAuthnDID
-      );
-
-      // Find which intention was just updated
-      let updatedIntentionId = null;
-      try {
-        const allEntries = await database.all();
-        const latestEntry = allEntries.sort(
-          (a, b) => b.value.createdAt - a.value.createdAt
-        )[0];
-        updatedIntentionId = latestEntry?.value.intentionId;
-      } catch (error) {
-        console.warn('Could not determine which intention was updated:', error);
-      }
-
-      // Store verification result
-      if (updatedIntentionId) {
-        identityVerifications.set(updatedIntentionId, {
-          success: verification.success,
-          timestamp: Date.now(),
-          identityHash: updateIdentityHash,
-          error: verification.error || null,
-          method: verification.method
-        });
-        console.log(
-          `💾 Stored verification for intention ${updatedIntentionId}: ${verification.success ? 'PASSED' : 'FAILED'}`
-        );
-      }
-    } catch (identityError) {
-      console.error('❌ Error verifying identity:', identityError);
+      const allEntries = await database.all();
+      console.log(`📊 Total intentions in database: ${allEntries.length}`);
+    } catch (error) {
+      console.warn('Could not get intention count:', error);
     }
   });
 
