@@ -39,6 +39,7 @@ jobs:
       - name: Setup local dependency
         run: |
           mkdir -p node_modules/@le-space
+          rm -f node_modules/@le-space/orbitdb-identity-provider-webauthn-did
           cp -r orbitdb-identity-provider-webauthn-did node_modules/@le-space/orbitdb-identity-provider-webauthn-did
 
       - name: Build
