@@ -7,7 +7,9 @@
 
   const dispatch = createEventDispatcher();
 
-  let title = '';
+  export let initialTitle = '';
+
+  let title = initialTitle;
   let description = '';
   let location = '';
   let category = 'general';

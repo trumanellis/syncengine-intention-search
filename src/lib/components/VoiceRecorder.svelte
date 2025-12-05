@@ -407,16 +407,18 @@
   .mini-recording {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 8px;
     background: rgba(20, 20, 20, 0.8);
     border: 1px solid var(--moss-green);
     border-radius: 6px;
-    padding: 8px 12px;
+    padding: 6px 10px;
     font-family: var(--font-mono);
     font-size: 11px;
     color: var(--white);
     opacity: 0.9;
     animation: slide-in 0.3s ease;
+    width: fit-content;
+    margin-left: auto;
   }
 
   @keyframes slide-in {
@@ -527,11 +529,14 @@
   .voice-controls {
     display: flex;
     align-items: center;
-    gap: 12px;
-    background: rgba(20, 20, 20, 0.8);
-    border: 1px solid var(--moss-green);
+    gap: 10px;
+    background: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
     border-radius: 8px;
     padding: 12px 16px;
+    width: fit-content;
+    margin-left: auto;
   }
 
   .record-btn {

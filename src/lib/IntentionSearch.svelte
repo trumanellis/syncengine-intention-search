@@ -50,6 +50,13 @@
     'opportunities to serve others'
   ];
 
+  // Auto-resize textarea
+  let textareaElement;
+  $: if (textareaElement && searchQuery !== undefined) {
+    textareaElement.style.height = 'auto';
+    textareaElement.style.height = textareaElement.scrollHeight + 'px';
+  }
+
   // Auth & Database
   let credential = null;
   let isAuthenticated = false;
@@ -544,111 +551,108 @@
     <!-- SEARCH SCREEN -->
     {#if currentScreen === 'search'}
       <div class="search-layout">
-        <!-- Left Column: Roller Wheel (66%) -->
-        <div class="search-left">
-          <div class="roller-container">
-            <div class="roller-wheel">
-              <!-- History items - rainbow from violet -->
-              {#each getDisplayHistory() as historyText, i}
-                {#if i === 0}
-                  <div
-                    class="roller-item history history-3"
-                    on:click={() => handleRollerItemClick(historyText)}
-                    on:keydown={(e) => e.key === 'Enter' && handleRollerItemClick(historyText)}
-                    role="button"
-                    tabindex="0"
-                  >
-                    {historyText}
-                  </div>
-                {:else if i === 1}
-                  <div
-                    class="roller-item history history-2"
-                    on:click={() => handleRollerItemClick(historyText)}
-                    on:keydown={(e) => e.key === 'Enter' && handleRollerItemClick(historyText)}
-                    role="button"
-                    tabindex="0"
-                  >
-                    {historyText}
-                  </div>
-                {:else if i === 2}
-                  <div
-                    class="roller-item history history-1"
-                    on:click={() => handleRollerItemClick(historyText)}
-                    on:keydown={(e) => e.key === 'Enter' && handleRollerItemClick(historyText)}
-                    role="button"
-                    tabindex="0"
-                  >
-                    {historyText}
-                  </div>
-                {/if}
-              {/each}
-
-              <!-- Current input - focal point -->
-              <div class="roller-item current">
-                <span class="terminal-prompt">&gt;  sync-engine :</span>
-                <input
-                  type="text"
-                  class="terminal-input"
-                  bind:value={searchQuery}
-                  on:keydown={(e) => e.key === 'Enter' && handleSearch()}
-                  placeholder="I am open to receiving..."
-                  autocomplete="off"
-                  spellcheck="false"
-                  disabled={loading}
-                />
-                <button
-                  class="submit-btn"
-                  on:click={handleSearch}
-                  disabled={loading || !searchQuery.trim()}
-                  title="Submit search"
+        <div class="roller-container">
+          <div class="roller-wheel">
+            <!-- History items - rainbow from violet -->
+            {#each getDisplayHistory() as historyText, i}
+              {#if i === 0}
+                <div
+                  class="roller-item history history-3"
+                  on:click={() => handleRollerItemClick(historyText)}
+                  on:keydown={(e) => e.key === 'Enter' && handleRollerItemClick(historyText)}
+                  role="button"
+                  tabindex="0"
                 >
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M5 12h14"/>
-                    <path d="m12 5 7 7-7 7"/>
-                  </svg>
-                </button>
-              </div>
+                  {historyText}
+                </div>
+              {:else if i === 1}
+                <div
+                  class="roller-item history history-2"
+                  on:click={() => handleRollerItemClick(historyText)}
+                  on:keydown={(e) => e.key === 'Enter' && handleRollerItemClick(historyText)}
+                  role="button"
+                  tabindex="0"
+                >
+                  {historyText}
+                </div>
+              {:else if i === 2}
+                <div
+                  class="roller-item history history-1"
+                  on:click={() => handleRollerItemClick(historyText)}
+                  on:keydown={(e) => e.key === 'Enter' && handleRollerItemClick(historyText)}
+                  role="button"
+                  tabindex="0"
+                >
+                  {historyText}
+                </div>
+              {/if}
+            {/each}
 
-              <!-- Suggestions - rainbow to red -->
-              {#each suggestions as suggestionText, i}
-                {#if i === 0}
-                  <div
-                    class="roller-item suggestion suggestion-1"
-                    on:click={() => handleRollerItemClick(suggestionText)}
-                    on:keydown={(e) => e.key === 'Enter' && handleRollerItemClick(suggestionText)}
-                    role="button"
-                    tabindex="0"
-                  >
-                    {suggestionText}
-                  </div>
-                {:else if i === 1}
-                  <div
-                    class="roller-item suggestion suggestion-2"
-                    on:click={() => handleRollerItemClick(suggestionText)}
-                    on:keydown={(e) => e.key === 'Enter' && handleRollerItemClick(suggestionText)}
-                    role="button"
-                    tabindex="0"
-                  >
-                    {suggestionText}
-                  </div>
-                {:else if i === 2}
-                  <div
-                    class="roller-item suggestion suggestion-3"
-                    on:click={() => handleRollerItemClick(suggestionText)}
-                    on:keydown={(e) => e.key === 'Enter' && handleRollerItemClick(suggestionText)}
-                    role="button"
-                    tabindex="0"
-                  >
-                    {suggestionText}
-                  </div>
-                {/if}
-              {/each}
+            <!-- Current input - focal point -->
+            <div class="roller-item current">
+              <textarea
+                bind:this={textareaElement}
+                class="terminal-input"
+                bind:value={searchQuery}
+                on:keydown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    handleSearch();
+                  }
+                }}
+                on:input={() => {
+                  if (textareaElement) {
+                    textareaElement.style.height = 'auto';
+                    textareaElement.style.height = textareaElement.scrollHeight + 'px';
+                  }
+                }}
+                placeholder="I am open to receiving..."
+                autocomplete="off"
+                spellcheck="false"
+                disabled={loading}
+                rows="1"
+              />
             </div>
+
+            <!-- Suggestions - rainbow to red -->
+            {#each suggestions as suggestionText, i}
+              {#if i === 0}
+                <div
+                  class="roller-item suggestion suggestion-1"
+                  on:click={() => handleRollerItemClick(suggestionText)}
+                  on:keydown={(e) => e.key === 'Enter' && handleRollerItemClick(suggestionText)}
+                  role="button"
+                  tabindex="0"
+                >
+                  {suggestionText}
+                </div>
+              {:else if i === 1}
+                <div
+                  class="roller-item suggestion suggestion-2"
+                  on:click={() => handleRollerItemClick(suggestionText)}
+                  on:keydown={(e) => e.key === 'Enter' && handleRollerItemClick(suggestionText)}
+                  role="button"
+                  tabindex="0"
+                >
+                  {suggestionText}
+                </div>
+              {:else if i === 2}
+                <div
+                  class="roller-item suggestion suggestion-3"
+                  on:click={() => handleRollerItemClick(suggestionText)}
+                  on:keydown={(e) => e.key === 'Enter' && handleRollerItemClick(suggestionText)}
+                  role="button"
+                  tabindex="0"
+                >
+                  {suggestionText}
+                </div>
+              {/if}
+            {/each}
           </div>
         </div>
 
-        <!-- Right Column: Voice Recordings (33%) -->
-        <div class="search-right">
+        <!-- Voice Interface - Fixed bottom right -->
+        <div class="voice-interface-container">
           <VoiceRecorder on:submit={handleVoiceSubmit} />
         </div>
       </div>
@@ -694,6 +698,7 @@
           </div>
           <div class="form-scroll">
             <CreateIntentionForm
+              initialTitle={searchQuery}
               on:create={handleCreateIntention}
               on:cancel={() => (currentScreen = 'search')}
             />
@@ -811,29 +816,25 @@
     margin: 0;
   }
 
-  /* ===== Search Screen - Two Column Layout ===== */
+  /* ===== Search Screen - Single Layout ===== */
   .search-layout {
     display: flex;
-    gap: 3rem;
+    justify-content: center;
+    align-items: center;
     width: 100%;
     max-width: 1600px;
     height: 100%;
+    position: relative;
   }
 
-  .search-left {
-    flex: 0 0 calc(66% - 1.5rem);
-    display: flex;
-    justify-content: flex-end;
-    align-items: center;
-    padding-right: 1rem;
-  }
-
-  .search-right {
-    flex: 0 0 calc(33% - 1.5rem);
-    display: flex;
-    flex-direction: column;
-    padding-left: 1rem;
-    border-left: 1px solid rgba(124, 184, 124, 0.15);
+  .voice-interface-container {
+    position: fixed;
+    bottom: 88px;
+    right: 2rem;
+    width: auto;
+    max-width: 280px;
+    max-height: 500px;
+    z-index: 100;
   }
 
   /* ===== Search Screen - Roller Wheel ===== */
@@ -851,7 +852,7 @@
 
   /* Individual roller items */
   .roller-item {
-    padding: 0.875rem 1.5rem;
+    padding: 0.5rem 0;
     font-family: var(--font-mono);
     font-size: 0.9375rem;
     font-weight: 300;
@@ -862,11 +863,11 @@
     text-align: left;
   }
 
-  /* History items - above current, neon rainbow from violet */
+  /* History items - above current */
   .roller-item.history {
     cursor: pointer;
     transition: all 0.3s ease;
-    padding-left: 166px;
+    color: var(--white);
   }
 
   .roller-item.history:hover {
@@ -874,29 +875,27 @@
   }
 
   .roller-item.history-3 {
-    color: #bf5fff;
-    opacity: 0.67;
-    font-size: 0.75rem;
-  }
-
-  .roller-item.history-2 {
-    color: #5f8fff;
-    opacity: 0.78;
+    opacity: 0.50;
     font-size: 0.8125rem;
   }
 
-  .roller-item.history-1 {
-    color: var(--cyan);
-    opacity: 0.89;
+  .roller-item.history-2 {
+    opacity: 0.65;
     font-size: 0.875rem;
+  }
+
+  .roller-item.history-1 {
+    opacity: 0.80;
+    font-size: 0.9375rem;
+    padding-bottom: 0.125rem;
   }
 
   /* Current input - the focal point */
   .roller-item.current {
     position: relative;
     background: transparent;
-    padding: 1.25rem 1.5rem;
-    margin: 0.5rem 0;
+    padding: 0;
+    margin: 0;
     opacity: 1;
     z-index: 10;
     display: flex;
@@ -919,11 +918,14 @@
     border: none;
     outline: none;
     font-family: var(--font-mono);
-    font-size: 1rem;
+    font-size: 3rem;
     font-weight: 300;
     color: #39ff14;
     caret-color: #39ff14;
-    line-height: 1.6;
+    line-height: 1.2;
+    resize: none;
+    overflow: hidden;
+    min-height: 1.2em;
   }
 
   .terminal-input::placeholder {
@@ -931,54 +933,32 @@
     font-style: italic;
   }
 
-  .submit-btn {
-    background: transparent;
-    border: 1px solid var(--moss-green);
-    border-radius: 4px;
-    padding: 0.5rem;
-    cursor: pointer;
-    color: var(--moss-glow);
-    opacity: 0.6;
-    transition: all 0.3s ease;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-
-  .submit-btn:hover:not(:disabled) {
-    opacity: 1;
-    border-color: #39ff14;
-    color: #39ff14;
-    box-shadow: 0 0 15px rgba(57, 255, 20, 0.3);
-  }
-
-  /* Suggestion items - below current, neon rainbow to red */
+  /* Suggestion items - below current */
   .roller-item.suggestion {
     cursor: pointer;
     transition: all 0.3s ease;
-    padding-left: 166px;
+    color: var(--cyan-dim);
   }
 
   .roller-item.suggestion:hover {
-    opacity: 1 !important;
+    color: var(--cyan);
+    opacity: 0.90 !important;
   }
 
   .roller-item.suggestion-1 {
-    color: #c8ff00;
-    opacity: 0.89;
-    font-size: 0.875rem;
+    opacity: 0.75;
+    font-size: 0.9375rem;
+    padding-top: 0.125rem;
   }
 
   .roller-item.suggestion-2 {
-    color: #ff9f00;
-    opacity: 0.78;
-    font-size: 0.8125rem;
+    opacity: 0.70;
+    font-size: 0.875rem;
   }
 
   .roller-item.suggestion-3 {
-    color: #ff3366;
-    opacity: 0.67;
-    font-size: 0.75rem;
+    opacity: 0.65;
+    font-size: 0.8125rem;
   }
 
   /* ===== Decision Screen - Vertical Split Layout ===== */
@@ -1134,36 +1114,12 @@
       padding: 1.5rem;
     }
 
-    .search-layout {
-      flex-direction: column;
-      gap: 0;
-      height: 100%;
-    }
-
-    .search-left {
-      flex: 0 0 66%;
-      padding-right: 0;
-      border-bottom: 1px solid rgba(124, 184, 124, 0.15);
-      border-right: none;
-    }
-
-    .search-right {
-      flex: 0 0 33%;
-      padding-left: 0;
-      padding: 1rem;
-      border-left: none;
-      position: relative;
-      display: flex;
-      justify-content: flex-end;
-      align-items: flex-end;
-    }
-
-    .search-right :global(.voice-interface) {
-      position: absolute;
-      bottom: 1rem;
+    .voice-interface-container {
+      bottom: 88px;
       right: 1rem;
       width: auto;
-      max-width: 320px;
+      max-width: 240px;
+      max-height: 400px;
     }
 
     .roller-container {
@@ -1173,14 +1129,11 @@
 
     .roller-item.history,
     .roller-item.suggestion {
-      padding-left: 1.5rem;
-      font-size: 0.75rem !important;
+      padding-left: 0;
     }
 
     .roller-item.current {
-      flex-direction: column;
-      gap: 0.5rem;
-      align-items: stretch;
+      padding: 1rem 0;
     }
 
     .terminal-prompt {
