@@ -17,6 +17,160 @@ export function getVerificationForIntention(intentionId) {
   return identityVerifications.get(intentionId) || null;
 }
 
+// IndexedDB cache for instant loading
+const CACHE_DB_NAME = 'syncengine-cache';
+const CACHE_STORE_NAME = 'intentions';
+const CACHE_VERSION = 1;
+
+/**
+ * Opens the IndexedDB cache for intentions
+ * @returns {Promise<IDBDatabase>}
+ */
+async function openCacheDB() {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(CACHE_DB_NAME, CACHE_VERSION);
+
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => resolve(request.result);
+
+    request.onupgradeneeded = (event) => {
+      const db = event.target.result;
+      if (!db.objectStoreNames.contains(CACHE_STORE_NAME)) {
+        const store = db.createObjectStore(CACHE_STORE_NAME, { keyPath: 'intentionId' });
+        store.createIndex('createdAt', 'createdAt', { unique: false });
+      }
+    };
+  });
+}
+
+/**
+ * Loads intentions from IndexedDB cache instantly
+ * @returns {Promise<Array>} Cached intentions
+ */
+export async function loadIntentionsFromCache() {
+  try {
+    const db = await openCacheDB();
+    return new Promise((resolve, reject) => {
+      const transaction = db.transaction([CACHE_STORE_NAME], 'readonly');
+      const store = transaction.objectStore(CACHE_STORE_NAME);
+      const request = store.getAll();
+
+      request.onsuccess = () => {
+        const intentions = request.result.sort((a, b) => b.createdAt - a.createdAt);
+        console.log('📦 Loaded', intentions.length, 'intentions from cache');
+        resolve(intentions);
+      };
+      request.onerror = () => reject(request.error);
+    });
+  } catch (error) {
+    console.warn('⚠️ Failed to load from cache:', error);
+    return [];
+  }
+}
+
+/**
+ * Saves intentions to IndexedDB cache
+ * @param {Array} intentions - Intentions to cache
+ */
+export async function saveIntentionsToCache(intentions) {
+  try {
+    const db = await openCacheDB();
+    const transaction = db.transaction([CACHE_STORE_NAME], 'readwrite');
+    const store = transaction.objectStore(CACHE_STORE_NAME);
+
+    // Clear existing cache
+    await new Promise((resolve, reject) => {
+      const clearRequest = store.clear();
+      clearRequest.onsuccess = () => resolve();
+      clearRequest.onerror = () => reject(clearRequest.error);
+    });
+
+    // Add all intentions
+    for (const intention of intentions) {
+      store.put(intention);
+    }
+
+    await new Promise((resolve, reject) => {
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+    });
+
+    console.log('💾 Cached', intentions.length, 'intentions to IndexedDB');
+  } catch (error) {
+    console.warn('⚠️ Failed to save to cache:', error);
+  }
+}
+
+/**
+ * Clears all cached intentions
+ */
+export async function clearIntentionsCache() {
+  try {
+    const db = await openCacheDB();
+    const transaction = db.transaction([CACHE_STORE_NAME], 'readwrite');
+    const store = transaction.objectStore(CACHE_STORE_NAME);
+    await new Promise((resolve, reject) => {
+      const request = store.clear();
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error);
+    });
+    console.log('🗑️ Cleared intentions cache');
+  } catch (error) {
+    console.warn('⚠️ Failed to clear cache:', error);
+  }
+}
+
+/**
+ * Completely resets all stored data for a fresh start
+ * Clears localStorage, IndexedDB cache, and OrbitDB/Helia storage
+ */
+export async function resetAllData() {
+  try {
+    console.log('🗑️ Starting complete data reset...');
+
+    // Clear localStorage
+    localStorage.removeItem('syncengine-database-address');
+    localStorage.removeItem('webauthn-credential');
+    localStorage.removeItem('active-intention-id');
+    localStorage.removeItem('attention-switch-log');
+    console.log('✅ Cleared localStorage');
+
+    // Clear intentions cache
+    await clearIntentionsCache();
+
+    // Clear all IndexedDB databases
+    if ('databases' in indexedDB) {
+      const databases = await indexedDB.databases();
+      for (const db of databases) {
+        if (
+          db.name.includes('orbitdb') ||
+          db.name.includes('helia') ||
+          db.name.includes('syncengine') ||
+          db.name.includes('level')
+        ) {
+          console.log('🗑️ Deleting database:', db.name);
+          await new Promise((resolve, reject) => {
+            const request = indexedDB.deleteDatabase(db.name);
+            request.onsuccess = () => resolve();
+            request.onerror = () => reject(request.error);
+            request.onblocked = () => {
+              console.warn('⚠️ Database deletion blocked:', db.name);
+              resolve(); // Continue anyway
+            };
+          });
+        }
+      }
+    }
+
+    console.log('✅ Complete data reset finished!');
+    console.log('💡 Refresh the page to start with a new database');
+    return true;
+  } catch (error) {
+    console.error('❌ Failed to reset all data:', error);
+    throw error;
+  }
+}
+
 /**
  * Extracts database address from URL parameter
  * @returns {string|null} Database address from URL or null
@@ -243,7 +397,7 @@ export async function loadIntentions(database, isNewDatabase = false) {
   if (!database) return [];
 
   try {
-    console.log('📊 Loading intentions from database:', {
+    console.log('📊 Loading intentions from OrbitDB:', {
       databaseName: database.name,
       databaseAddress: database.address,
       databaseType: database.type,
@@ -269,20 +423,23 @@ export async function loadIntentions(database, isNewDatabase = false) {
       )
     ]);
 
-    console.log('✅ Database.all() completed, entries found:', allIntentions.length);
+    console.log('✅ OrbitDB sync completed, entries found:', allIntentions.length);
 
     const intentions = allIntentions
       .map((entry) => entry.value)
       .sort((a, b) => b.createdAt - a.createdAt);
 
-    console.log('📋 Intentions loaded successfully:', intentions.length);
+    console.log('📋 Intentions loaded from OrbitDB:', intentions.length);
+
+    // Cache the loaded intentions for next startup
+    await saveIntentionsToCache(intentions);
+
     return intentions;
   } catch (error) {
-    console.error('❌ Failed to load intentions:', error);
-    console.log('💡 Database may be syncing - try refreshing in a moment');
+    console.error('❌ Failed to load from OrbitDB:', error);
+    console.log('💡 Loading from cache while waiting for peers...');
     // If loading fails, return empty array rather than throwing
     // This prevents authentication from failing completely
-    console.log('⚠️ Returning empty array due to load error');
     return [];
   }
 }
@@ -348,6 +505,11 @@ export async function createIntention(database, intentionData, credential = null
     dbLog('database.put() completed in %d ms', endTime - startTime);
 
     console.log('✅ Intention created:', intentionId);
+
+    // Update cache with new intention
+    const currentCache = await loadIntentionsFromCache();
+    await saveIntentionsToCache([...currentCache, intentionWithEmbedding]);
+
     return intentionWithEmbedding;
   } catch (error) {
     console.error('Failed to create intention:', error);

@@ -218,23 +218,48 @@
       // Start peer count tracking
       startPeerCountTracking();
 
-      // Load existing intentions
-      allIntentions = await loadIntentions(database, database._isNewDatabase);
+      // Load from cache FIRST for instant UI
+      const { loadIntentionsFromCache } = await import('./database.js');
+      allIntentions = await loadIntentionsFromCache();
 
-      // Show dashboard immediately after authentication succeeds
+      // Show dashboard immediately with cached data
       isAuthenticated = true;
       currentScreen = 'search';
-      status = 'ready';
+      status = allIntentions.length > 0 ? 'loaded-from-cache' : 'syncing';
       loading = false;
 
       // Load ML model in background (non-blocking)
-      status = 'loading-model-background';
       loadModelInBackground();
+
+      // Sync from OrbitDB in background (non-blocking)
+      syncFromOrbitDB();
     } catch (error) {
       console.error('Authentication failed:', error);
       status = 'auth-failed';
       authError = error.message;
       loading = false;
+    }
+  }
+
+  async function syncFromOrbitDB() {
+    if (!database) return;
+
+    try {
+      status = 'syncing';
+      const { loadIntentions } = await import('./database.js');
+      const synced = await loadIntentions(database, database._isNewDatabase);
+
+      // Update intentions if we got new data
+      if (synced.length > 0) {
+        allIntentions = synced;
+        status = 'synced';
+        console.log('✅ Synced', synced.length, 'intentions from OrbitDB');
+      } else {
+        status = 'ready';
+      }
+    } catch (error) {
+      console.error('Failed to sync from OrbitDB:', error);
+      status = 'sync-failed';
     }
   }
 
@@ -484,39 +509,34 @@
   }
 
   async function handleLeaveDatabase() {
+    if (!confirm('Leave this database and start fresh? All local data will be cleared and the page will reload.')) {
+      return;
+    }
+
     try {
-      // Clear stored database address
-      localStorage.removeItem('syncengine-database-address');
+      showInvitationPanel = false;
 
       // Cleanup current connections
       if (orbitdbInstances) {
         await cleanup({ ...orbitdbInstances, database });
       }
 
-      // Reset state
-      credential = null;
-      isAuthenticated = false;
-      database = null;
-      orbitdbInstances = null;
-      allIntentions = [];
-      searchResults = [];
-      databaseAddress = '';
-      peerCount = 0;
-      isJoinedViaInvitation = false;
-      showInvitationPanel = false;
-
       // Clear intervals
       if (peerCountInterval) {
         clearInterval(peerCountInterval);
       }
 
-      currentScreen = 'auth';
-      status = 'database-left';
+      // Complete data reset
+      const { resetAllData } = await import('./database.js');
+      await resetAllData();
 
-      console.log('✅ Left database successfully');
+      // Reload page to start fresh
+      console.log('🔄 Reloading page...');
+      window.location.reload();
     } catch (error) {
       console.error('Error leaving database:', error);
       status = 'error';
+      authError = 'Failed to reset data: ' + error.message;
     }
   }
 
@@ -578,6 +598,10 @@
       'auth-cancelled': 'authentication cancelled',
       'logged-out': 'logged out',
       'database-left': 'database left',
+      'loaded-from-cache': 'loaded (syncing...)',
+      'syncing': 'syncing with peers...',
+      'synced': 'synced',
+      'sync-failed': 'sync failed',
       'error': 'error occurred',
       'voice-error': 'voice error'
     };
