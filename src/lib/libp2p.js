@@ -8,6 +8,7 @@ import { noise } from '@chainsafe/libp2p-noise';
 import { yamux } from '@chainsafe/libp2p-yamux';
 import { identify } from '@libp2p/identify';
 import { gossipsub } from '@chainsafe/libp2p-gossipsub';
+import { pubsubPeerDiscovery } from '@libp2p/pubsub-peer-discovery';
 import { bootstrap } from '@libp2p/bootstrap';
 import { all } from '@libp2p/websockets/filters';
 import { LevelBlockstore } from 'blockstore-level';
@@ -51,12 +52,21 @@ export async function createLibp2pInstance() {
         emitSelf: true, // Enable to see our own messages
         allowPublishToZeroTopicPeers: true,
       }),
+      pubsubPeerDiscovery: pubsubPeerDiscovery({
+        interval: 1000, // Check for peers every second
+        topics: ['_peer-discovery._p2p._pubsub'], // Default discovery topic
+        listenOnly: false // Actively broadcast our presence
+      }),
       bootstrap: bootstrap({
         list: [
+          // DNS bootstrap nodes
           '/dnsaddr/bootstrap.libp2p.io/p2p/QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN',
           '/dnsaddr/bootstrap.libp2p.io/p2p/QmQCU2EcMqAqQPR2i9bChDtGNJchTbq5TbXJJ16u19uLTa',
           '/dnsaddr/bootstrap.libp2p.io/p2p/QmbLHAnMoJPWSCR5Zhtx6BHJX9KiKNN6tpvbUcqanj75Nb',
-          '/dnsaddr/bootstrap.libp2p.io/p2p/QmcZf59bWwK5XFi76CZX8cbJ4BhTzzA3gU1ZjYZcYW3dwt'
+          '/dnsaddr/bootstrap.libp2p.io/p2p/QmcZf59bWwK5XFi76CZX8cbJ4BhTzzA3gU1ZjYZcYW3dwt',
+          // IP bootstrap nodes (circuit relays) for faster relay reservation
+          '/ip4/147.75.83.83/tcp/4001/p2p/QmbLHAnMoJPWSCR5Zhtx6BHJX9KiKNN6tpvbUcqanj75Nb',
+          '/ip4/147.75.195.153/tcp/4001/p2p/QmQCU2EcMqAqQPR2i9bChDtGNJchTbq5TbXJJ16u19uLTa'
         ],
         timeout: 2000, // Timeout for bootstrap connections
         tagName: 'bootstrap',

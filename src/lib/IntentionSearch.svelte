@@ -26,6 +26,7 @@
   import CreateIntentionForm from './components/CreateIntentionForm.svelte';
   import IntentionDetail from './components/IntentionDetail.svelte';
   import InvitationPanel from './components/InvitationPanel.svelte';
+  import NetworkDiagnostics from './components/NetworkDiagnostics.svelte';
 
   // Props
   export let userLocation = null; // [latitude, longitude]
@@ -44,6 +45,14 @@
   let databaseAddress = '';
   let peerCount = 0;
   let isJoinedViaInvitation = false;
+
+  // Network diagnostics state
+  let bootstrapConnected = 0;
+  let relayReservations = 0;
+  let multiaddrsCount = 0;
+  let discoveryMethod = 'none';
+  let lastPeerEvent = null;
+  let connectionLogs = [];
 
   // Roller wheel state
   let searchHistory = [
@@ -204,11 +213,12 @@
       // Setup OrbitDB
       orbitdbInstances = await setupOrbitDB(credential);
 
-      // Open intentions database
+      // Open intentions database (pass libp2p for direct peer connection)
       database = await openIntentionsDatabase(
         orbitdbInstances.orbitdb,
         orbitdbInstances.identity,
-        orbitdbInstances.identities
+        orbitdbInstances.identities,
+        orbitdbInstances.libp2p
       );
 
       // Store database info
@@ -494,22 +504,133 @@
     }
   }
 
+  function addConnectionLog(type, message) {
+    const log = {
+      type,
+      message,
+      timestamp: Date.now()
+    };
+    connectionLogs = [...connectionLogs, log];
+
+    // Keep only last 50 logs
+    if (connectionLogs.length > 50) {
+      connectionLogs = connectionLogs.slice(-50);
+    }
+  }
+
+  function handleClearLogs() {
+    connectionLogs = [];
+  }
+
   function startPeerCountTracking() {
     if (!orbitdbInstances?.libp2p) return;
 
-    // Update immediately
-    updatePeerCount();
+    const libp2p = orbitdbInstances.libp2p;
 
-    // Update every 3 seconds
+    // Add initial log
+    addConnectionLog('info', 'Network diagnostics started');
+
+    // Update immediately
+    updateNetworkDiagnostics();
+
+    // Set up libp2p event listeners for real-time updates
+    libp2p.addEventListener('peer:connect', (event) => {
+      const peerId = event.detail.toString();
+      console.log('🤝 Peer connected:', peerId);
+      addConnectionLog('peer:connect', `Peer connected: ${peerId.substring(0, 12)}...`);
+      lastPeerEvent = Date.now();
+      discoveryMethod = 'pubsub/bootstrap';
+      updateNetworkDiagnostics();
+    });
+
+    libp2p.addEventListener('peer:disconnect', (event) => {
+      const peerId = event.detail.toString();
+      console.log('👋 Peer disconnected:', peerId);
+      addConnectionLog('peer:disconnect', `Peer disconnected: ${peerId.substring(0, 12)}...`);
+      lastPeerEvent = Date.now();
+      updateNetworkDiagnostics();
+    });
+
+    libp2p.addEventListener('peer:discovery', (event) => {
+      const peerId = event.detail.id.toString();
+      console.log('🔍 Peer discovered:', peerId);
+      addConnectionLog('peer:discovery', `Discovered peer: ${peerId.substring(0, 12)}...`);
+      lastPeerEvent = Date.now();
+      if (!discoveryMethod || discoveryMethod === 'none') {
+        discoveryMethod = 'discovering';
+      }
+    });
+
+    // Update every 3 seconds and log significant changes
+    let lastBootstrapCount = 0;
+    let lastRelayCount = 0;
+    let lastMultiaddrCount = 0;
+
     peerCountInterval = setInterval(() => {
-      updatePeerCount();
+      updateNetworkDiagnostics();
+
+      // Log significant changes
+      if (bootstrapConnected !== lastBootstrapCount) {
+        if (bootstrapConnected > lastBootstrapCount) {
+          addConnectionLog('bootstrap', `Connected to ${bootstrapConnected}/6 bootstrap nodes`);
+        }
+        lastBootstrapCount = bootstrapConnected;
+      }
+
+      if (relayReservations !== lastRelayCount) {
+        if (relayReservations > lastRelayCount) {
+          addConnectionLog('relay', `Circuit relay reservation established (${relayReservations} active)`);
+        }
+        lastRelayCount = relayReservations;
+      }
+
+      if (multiaddrsCount !== lastMultiaddrCount && multiaddrsCount > 0) {
+        addConnectionLog('info', `Multiaddrs updated: ${multiaddrsCount} addresses available`);
+        lastMultiaddrCount = multiaddrsCount;
+      }
     }, 3000);
   }
 
-  function updatePeerCount() {
-    if (orbitdbInstances?.libp2p) {
-      const peers = orbitdbInstances.libp2p.getPeers();
-      peerCount = peers.length;
+  function updateNetworkDiagnostics() {
+    if (!orbitdbInstances?.libp2p) return;
+
+    const libp2p = orbitdbInstances.libp2p;
+
+    // Update peer count
+    const peers = libp2p.getPeers();
+    peerCount = peers.length;
+
+    // Count bootstrap connections
+    try {
+      const connections = libp2p.getConnections();
+      bootstrapConnected = connections.filter(conn => {
+        const remotePeer = conn.remotePeer.toString();
+        return remotePeer.includes('QmNnooDu7') || remotePeer.includes('QmQCU2Ec') ||
+               remotePeer.includes('QmbLHAn') || remotePeer.includes('Qmcf59b');
+      }).length;
+    } catch (error) {
+      bootstrapConnected = 0;
+    }
+
+    // Count multiaddrs
+    try {
+      const multiaddrs = libp2p.getMultiaddrs();
+      multiaddrsCount = multiaddrs?.length || 0;
+
+      // Check for relay reservations
+      relayReservations = multiaddrs?.filter(ma =>
+        ma.toString().includes('/p2p-circuit/')
+      ).length || 0;
+    } catch (error) {
+      multiaddrsCount = 0;
+      relayReservations = 0;
+    }
+
+    // Update discovery method based on connection state
+    if (peerCount > 0 && !discoveryMethod.includes('connected')) {
+      discoveryMethod = 'connected';
+    } else if (bootstrapConnected > 0 && discoveryMethod === 'none') {
+      discoveryMethod = 'bootstrap';
     }
   }
 
@@ -659,10 +780,24 @@
           <span>Share</span>
         </button>
       {/if}
-      <div class="status-indicator">
-        <div class="status-dot status-pulse"></div>
-        <span>{getStatusText(status)}</span>
-      </div>
+      {#if isAuthenticated}
+        <NetworkDiagnostics
+          {peerCount}
+          {bootstrapConnected}
+          {relayReservations}
+          {multiaddrsCount}
+          {discoveryMethod}
+          {lastPeerEvent}
+          {connectionLogs}
+          libp2p={orbitdbInstances?.libp2p}
+          on:clearLogs={handleClearLogs}
+        />
+      {:else}
+        <div class="status-indicator">
+          <div class="status-dot status-pulse"></div>
+          <span>{getStatusText(status)}</span>
+        </div>
+      {/if}
     </div>
   </header>
 
@@ -700,6 +835,28 @@
           <div class="error-banner">
             <p class="error-title">Connection Failed</p>
             <p class="error-message">{authError}</p>
+
+            <div class="error-help">
+              <strong>💡 Troubleshooting:</strong>
+              <ul>
+                {#if authError.includes('Failed to connect to peer')}
+                  <li>Ensure both devices are online and connected to the internet</li>
+                  <li>The peer may be behind a firewall or NAT - try using the same WiFi network</li>
+                  <li>Ask the person who shared the link to keep their browser window open</li>
+                  <li>Wait a moment and try again - P2P connections can take 10-30 seconds</li>
+                {:else if authError.includes('Failed to discover database peers')}
+                  <li>Ask the person who shared the link to keep their browser window open</li>
+                  <li>Make sure both devices are connected to the internet</li>
+                  <li>Wait a few moments and try again - bootstrap discovery can take up to 90 seconds</li>
+                  <li>Try refreshing this page with the magic link still in the URL</li>
+                {:else}
+                  <li>Make sure the database creator's device is online</li>
+                  <li>Try refreshing this page with the magic link still in the URL</li>
+                  <li>Check your internet connection</li>
+                {/if}
+              </ul>
+            </div>
+
             <button class="retry-button" on:click={authenticate}>
               Try Again
             </button>
@@ -885,6 +1042,7 @@
       {databaseAddress}
       {peerCount}
       {isJoinedViaInvitation}
+      libp2p={orbitdbInstances?.libp2p}
       on:close={handleCloseInvitation}
       on:leave={handleLeaveDatabase}
     />
@@ -1044,6 +1202,31 @@
     color: var(--white);
     margin: 0;
     line-height: 1.5;
+  }
+
+  .error-help {
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(124, 184, 124, 0.2);
+    border-radius: 6px;
+    padding: 1rem;
+    font-size: 0.8rem;
+    color: var(--white);
+  }
+
+  .error-help strong {
+    display: block;
+    color: var(--moss-glow);
+    margin-bottom: 0.5rem;
+  }
+
+  .error-help ul {
+    margin: 0;
+    padding-left: 1.25rem;
+  }
+
+  .error-help li {
+    margin: 0.35rem 0;
+    line-height: 1.4;
   }
 
   .retry-button {

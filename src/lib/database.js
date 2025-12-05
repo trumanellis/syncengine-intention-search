@@ -190,6 +190,81 @@ export function getDatabaseAddressFromURL() {
 }
 
 /**
+ * Extracts peer multiaddrs from URL parameter
+ * @returns {string[]|null} Array of peer multiaddrs or null
+ */
+export function getPeerMultiaddrsFromURL() {
+  if (typeof window === 'undefined') return null;
+
+  const params = new URLSearchParams(window.location.search);
+  const peersParam = params.get('peers');
+
+  if (peersParam) {
+    // Decode and split comma-separated multiaddrs
+    const multiaddrs = decodeURIComponent(peersParam)
+      .split(',')
+      .filter(addr => addr.trim().length > 0);
+
+    if (multiaddrs.length > 0) {
+      console.log('🔗 Peer addresses detected in magic link:', multiaddrs.length);
+      return multiaddrs;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Attempts to dial peers directly from multiaddrs
+ * @param {Object} libp2p - The libp2p instance
+ * @param {string[]} multiaddrs - Array of peer multiaddrs to dial
+ * @returns {Promise<boolean>} True if at least one peer connected
+ */
+export async function dialDirectPeers(libp2p, multiaddrs) {
+  if (!libp2p || !multiaddrs || multiaddrs.length === 0) {
+    return false;
+  }
+
+  console.log('📞 Attempting direct peer connection...');
+  console.log('🔗 Dialing', multiaddrs.length, 'peer address(es)');
+
+  const dialPromises = multiaddrs.map(async (multiaddr) => {
+    try {
+      console.log('  → Dialing:', multiaddr.substring(0, 60) + '...');
+      await libp2p.dial(multiaddr);
+      console.log('  ✅ Connected to peer via:', multiaddr.substring(0, 60) + '...');
+      return true;
+    } catch (error) {
+      console.warn('  ⚠️ Failed to dial peer:', error.message);
+      return false;
+    }
+  });
+
+  // Try to connect to at least one peer (with 10s timeout per dial)
+  try {
+    const results = await Promise.race([
+      Promise.allSettled(dialPromises),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('Direct dial timeout after 10 seconds')), 10000)
+      )
+    ]);
+
+    const successCount = results.filter(r => r.status === 'fulfilled' && r.value).length;
+
+    if (successCount > 0) {
+      console.log('✅ Direct peer connection established:', successCount, 'peer(s)');
+      return true;
+    } else {
+      console.log('⚠️ No direct peer connections succeeded');
+      return false;
+    }
+  } catch (error) {
+    console.warn('⚠️ Direct peer dial timed out:', error.message);
+    return false;
+  }
+}
+
+/**
  * Clears the database parameter from URL
  * Should be called after successfully connecting via magic link
  */
@@ -210,9 +285,10 @@ export function clearDatabaseFromURL() {
  * @param {Object} orbitdb - The OrbitDB instance
  * @param {Object} identity - The WebAuthn identity
  * @param {Object} identities - The OrbitDB identities instance
+ * @param {Object} libp2p - The libp2p instance (optional, for direct peer dialing)
  * @returns {Object} The opened database instance
  */
-export async function openIntentionsDatabase(orbitdb, identity, identities) {
+export async function openIntentionsDatabase(orbitdb, identity, identities, libp2p = null) {
   const ipfsInstance = orbitdb.ipfs;
 
   console.log('🌍 Opening global shared database...');
@@ -220,6 +296,7 @@ export async function openIntentionsDatabase(orbitdb, identity, identities) {
 
   // Priority 1: Check URL parameter (magic link invitation)
   const urlAddress = getDatabaseAddressFromURL();
+  const peerMultiaddrs = getPeerMultiaddrsFromURL();
 
   // Priority 2: Check if we have a stored database address
   const storedAddress = localStorage.getItem('syncengine-database-address');
@@ -234,8 +311,30 @@ export async function openIntentionsDatabase(orbitdb, identity, identities) {
     isJoinedViaInvitation = true;
 
     try {
+      let directPeerConnected = false;
+
+      // If we have peer multiaddrs, try direct connection first
+      if (peerMultiaddrs && peerMultiaddrs.length > 0 && libp2p) {
+        console.log('🚀 Magic link includes peer addresses for instant connection!');
+        directPeerConnected = await dialDirectPeers(libp2p, peerMultiaddrs);
+
+        if (directPeerConnected) {
+          // Give the peer a moment to settle
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        }
+      }
+
       // Connect to the database from magic link
-      // Use longer timeout for initial connection (30 seconds)
+      // Use shorter timeout if we connected directly (30s), longer if relying on bootstrap (90s)
+      const timeout = directPeerConnected ? 30000 : 90000;
+      const timeoutMessage = directPeerConnected
+        ? 'Database open timeout after 30 seconds'
+        : 'Database open timeout after 90 seconds (peer discovery via bootstrap)';
+
+      console.log(directPeerConnected
+        ? '⚡ Opening database with direct peer connection...'
+        : '🔍 Opening database, discovering peers via bootstrap...');
+
       database = await Promise.race([
         orbitdb.open(urlAddress, {
           type: 'documents',
@@ -243,10 +342,7 @@ export async function openIntentionsDatabase(orbitdb, identity, identities) {
           sync: true
         }),
         new Promise((_, reject) =>
-          setTimeout(
-            () => reject(new Error('Database open timeout after 30 seconds')),
-            30000
-          )
+          setTimeout(() => reject(new Error(timeoutMessage)), timeout)
         )
       ]);
 
@@ -256,19 +352,32 @@ export async function openIntentionsDatabase(orbitdb, identity, identities) {
       // Clear URL parameter after successful connection
       clearDatabaseFromURL();
 
-      console.log('✅ Successfully joined via invitation!');
+      if (directPeerConnected) {
+        console.log('✅ Successfully joined via direct peer connection!');
+      } else {
+        console.log('✅ Successfully joined via bootstrap discovery!');
+      }
       console.log('💾 Database address stored for future connections');
     } catch (error) {
       console.error('❌ Failed to join via magic link:', error.message);
-      console.log('💡 Tip: Make sure the person who shared the link has their device online');
 
       // Don't fall back to stored address - this prevents joining wrong database
       // Instead, clear the bad URL parameter and throw error
       clearDatabaseFromURL();
-      throw new Error(
-        'Failed to connect to shared database. The database owner may be offline. ' +
-        'Please ask them to make sure their device is online and try the link again.'
-      );
+
+      // Provide context-specific error message
+      if (peerMultiaddrs && peerMultiaddrs.length > 0) {
+        throw new Error(
+          'Failed to connect to peer. Please ensure both devices are online and try again. ' +
+          'If the problem persists, the peer may be behind a firewall or NAT that prevents direct connections.'
+        );
+      } else {
+        throw new Error(
+          'Failed to discover database peers after 90 seconds. ' +
+          'This may be due to network issues or the database creator being offline. ' +
+          'Please ask them to keep their browser window open and try again.'
+        );
+      }
     }
   }
 

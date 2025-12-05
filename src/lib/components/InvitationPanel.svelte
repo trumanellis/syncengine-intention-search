@@ -3,7 +3,7 @@
    * InvitationPanel Component - Terminal Aesthetic
    * Displays QR code and shareable link for database invitations
    */
-  import { createEventDispatcher, onMount } from 'svelte';
+  import { createEventDispatcher, onMount, onDestroy } from 'svelte';
   import QRCode from 'qrcode';
 
   const dispatch = createEventDispatcher();
@@ -11,19 +11,90 @@
   export let databaseAddress = '';
   export let peerCount = 0;
   export let isJoinedViaInvitation = false;
+  export let libp2p = null;
 
   let qrCodeDataURL = '';
   let magicLink = '';
   let copyStatus = '';
+  let hasPeerAddresses = false;
+  let addressCheckInterval = null;
 
   $: if (databaseAddress) {
     generateMagicLink();
   }
 
+  onMount(() => {
+    // Check for addresses every 5 seconds and regenerate link if new addresses appear
+    if (libp2p) {
+      addressCheckInterval = setInterval(() => {
+        const multiaddrs = libp2p.getMultiaddrs();
+        const currentCount = multiaddrs?.length || 0;
+
+        // If we now have addresses and didn't before, or count changed, regenerate
+        if (currentCount > 0 && (!hasPeerAddresses || currentCount !== multiaddrs.length)) {
+          console.log('📍 New peer addresses detected, regenerating magic link...');
+          generateMagicLink();
+        }
+      }, 5000);
+    }
+  });
+
+  onDestroy(() => {
+    if (addressCheckInterval) {
+      clearInterval(addressCheckInterval);
+    }
+  });
+
   function generateMagicLink() {
     const baseURL = window.location.origin + window.location.pathname;
     const encodedAddress = encodeURIComponent(databaseAddress);
-    magicLink = `${baseURL}?db=${encodedAddress}`;
+
+    // Get peer multiaddrs for direct connection
+    let peerAddressesParam = '';
+    hasPeerAddresses = false;
+
+    if (libp2p) {
+      try {
+        const multiaddrs = libp2p.getMultiaddrs();
+        console.log('📡 Available multiaddrs:', multiaddrs?.length || 0);
+
+        if (multiaddrs && multiaddrs.length > 0) {
+          // Convert multiaddrs to strings
+          const allAddrs = multiaddrs.map(ma => ma.toString());
+          console.log('📍 All addresses:', allAddrs);
+
+          // For local/same-network testing: include WebRTC, circuit relay, and local network addresses
+          // Exclude only true loopback (127.0.0.1, ::1)
+          const shareableAddrs = allAddrs.filter(addr => {
+            // Exclude only localhost/loopback, keep everything else including local network IPs
+            const isLoopback = addr.includes('/127.0.0.1/') || addr.includes('/::1/');
+            return !isLoopback;
+          });
+
+          console.log('🔗 Shareable addresses:', shareableAddrs.length);
+          if (shareableAddrs.length > 0) {
+            console.log('   ', shareableAddrs);
+          }
+
+          if (shareableAddrs.length > 0) {
+            // Encode multiaddrs as comma-separated list
+            peerAddressesParam = '&peers=' + encodeURIComponent(shareableAddrs.join(','));
+            hasPeerAddresses = true;
+            console.log('✨ Including', shareableAddrs.length, 'peer address(es) in magic link');
+          } else {
+            console.warn('⚠️ No shareable addresses available (all were loopback)');
+          }
+        } else {
+          console.warn('⚠️ No multiaddrs available from libp2p');
+        }
+      } catch (error) {
+        console.warn('⚠️ Failed to get peer multiaddrs:', error);
+      }
+    } else {
+      console.warn('⚠️ libp2p not available for peer address generation');
+    }
+
+    magicLink = `${baseURL}?db=${encodedAddress}${peerAddressesParam}`;
     generateQRCode();
   }
 
@@ -90,6 +161,21 @@
     <div class="network-status">
       <div class="status-dot" class:active={peerCount > 0}></div>
       <span>{peerCount} peer{peerCount !== 1 ? 's' : ''} connected</span>
+    </div>
+
+    <div class="info-banner">
+      {#if hasPeerAddresses}
+        <strong>✨ Ready for instant P2P connection!</strong>
+        This link includes your peer address for direct connection (usually &lt; 10 seconds).
+        Keep this window open while others join.
+      {:else}
+        <strong>🔍 Waiting for peer addresses...</strong>
+        Your browser is connecting to relay nodes to establish a shareable address.
+        This usually takes 10-30 seconds. The link will auto-update when ready.
+        <br><small style="opacity: 0.7; margin-top: 0.5rem; display: block;">
+          Or use the link now - it will work via bootstrap discovery (slower, 30-90s).
+        </small>
+      {/if}
     </div>
 
     {#if qrCodeDataURL}
@@ -366,6 +452,21 @@
     opacity: 1;
     background: rgba(255, 51, 102, 0.1);
     border-color: var(--red);
+  }
+
+  .info-banner {
+    padding: 0.75rem 1rem;
+    background: rgba(57, 255, 20, 0.05);
+    border: 1px solid rgba(57, 255, 20, 0.2);
+    border-radius: 6px;
+    font-size: 0.75rem;
+    color: var(--moss-glow);
+    line-height: 1.5;
+  }
+
+  .info-banner strong {
+    display: block;
+    margin-bottom: 0.25rem;
   }
 
   .warning {
