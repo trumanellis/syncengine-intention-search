@@ -33,13 +33,13 @@ jobs:
           repository: Le-Space/orbitdb-identity-provider-webauthn-did
           path: orbitdb-identity-provider-webauthn-did
 
+      - name: Install dependencies
+        run: npm ci
+
       - name: Setup local dependency
         run: |
           mkdir -p node_modules/@le-space
           cp -r orbitdb-identity-provider-webauthn-did node_modules/@le-space/orbitdb-identity-provider-webauthn-did
-
-      - name: Install dependencies
-        run: npm ci
 
       - name: Build
         env:
