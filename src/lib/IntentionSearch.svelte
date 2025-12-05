@@ -192,37 +192,45 @@
       // Load existing intentions
       allIntentions = await loadIntentions(database);
 
-      // Initialize search model with error handling
-      status = 'loading-model';
-      try {
-        await initializeSearchModel();
-        modelLoaded = true;
-        console.log('✅ ML model loaded, semantic search enabled');
-
-        // Batch embed intentions that don't have embeddings
-        if (allIntentions.length > 0) {
-          status = 'embedding';
-          allIntentions = await batchEmbedIntentions(
-            allIntentions,
-            (done, total) => {
-              status = `embedding-${done}/${total}`;
-            }
-          );
-        }
-      } catch (mlError) {
-        console.error('⚠️ ML model loading failed:', mlError);
-        console.warn('App will use mock data for search instead');
-        modelLoaded = false;
-      }
-
+      // Show dashboard immediately after authentication succeeds
       isAuthenticated = true;
       currentScreen = 'search';
-      status = modelLoaded ? 'ready' : 'demo-mode';
+      status = 'ready';
+      loading = false;
+
+      // Load ML model in background (non-blocking)
+      status = 'loading-model-background';
+      loadModelInBackground();
     } catch (error) {
       console.error('Authentication failed:', error);
       status = 'auth-failed';
-    } finally {
       loading = false;
+    }
+  }
+
+  async function loadModelInBackground() {
+    try {
+      await initializeSearchModel();
+      modelLoaded = true;
+      console.log('✅ ML model loaded, semantic search enabled');
+
+      // Batch embed intentions that don't have embeddings
+      if (allIntentions.length > 0) {
+        status = 'embedding';
+        allIntentions = await batchEmbedIntentions(
+          allIntentions,
+          (done, total) => {
+            status = `embedding-${done}/${total}`;
+          }
+        );
+      }
+
+      status = 'ready';
+    } catch (mlError) {
+      console.error('⚠️ ML model loading failed:', mlError);
+      console.warn('App will use keyword search instead');
+      modelLoaded = false;
+      status = 'demo-mode';
     }
   }
 
@@ -234,6 +242,19 @@
 
     try {
       loading = true;
+
+      // Check if model is still loading
+      if (!modelLoaded && status.includes('loading-model')) {
+        status = 'waiting-for-model';
+        // Wait a moment and show message
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        if (!modelLoaded) {
+          status = 'model-not-ready';
+          loading = false;
+          return;
+        }
+      }
+
       status = 'searching';
 
       // Add to search history
@@ -434,13 +455,16 @@
       'created': 'credential created',
       'authenticating': 'authenticating',
       'loading-model': 'loading ML model',
+      'loading-model-background': 'loading search engine...',
       'embedding': 'generating embeddings',
-      'demo-mode': 'ready (demo mode)',
+      'demo-mode': 'ready (keyword search)',
       'auth-failed': 'authentication failed',
       'searching': 'searching',
       'found': 'results found',
       'empty-query': 'enter search query',
       'search-failed': 'search failed',
+      'waiting-for-model': 'search engine loading...',
+      'model-not-ready': 'search engine not ready, try again',
       'creating-intention': 'creating',
       'created': 'created',
       'authenticating-switch': 'authenticating...',
@@ -455,6 +479,11 @@
     if (status.startsWith('found-')) {
       const parts = status.split('-');
       return `found ${parts[1]} results${parts[2] === 'kw' ? ' (keyword)' : ''}`;
+    }
+
+    if (status.startsWith('embedding-')) {
+      const parts = status.split('-');
+      return `generating embeddings ${parts[1]}`;
     }
 
     return statusMap[status] || 'listening';
@@ -1107,16 +1136,34 @@
 
     .search-layout {
       flex-direction: column;
-      gap: 1rem;
+      gap: 0;
+      height: 100%;
     }
 
-    .search-left,
-    .search-right {
-      flex: 1 1 100%;
+    .search-left {
+      flex: 0 0 66%;
+      padding-right: 0;
+      border-bottom: 1px solid rgba(124, 184, 124, 0.15);
+      border-right: none;
     }
 
     .search-right {
-      min-height: 300px;
+      flex: 0 0 33%;
+      padding-left: 0;
+      padding: 1rem;
+      border-left: none;
+      position: relative;
+      display: flex;
+      justify-content: flex-end;
+      align-items: flex-end;
+    }
+
+    .search-right :global(.voice-interface) {
+      position: absolute;
+      bottom: 1rem;
+      right: 1rem;
+      width: auto;
+      max-width: 320px;
     }
 
     .roller-container {
