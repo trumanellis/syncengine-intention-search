@@ -26,24 +26,21 @@ export function getVerificationForIntention(intentionId) {
  */
 export async function openIntentionsDatabase(orbitdb, identity, identities) {
   const ipfsInstance = orbitdb.ipfs;
-  const writePermissions = [identity.id];
 
-  console.log('🔓 Database access configuration:', {
-    writePermissions,
-    identityId: identity.id,
-    identityType: identity.type
-  });
+  console.log('🌍 Opening global shared database...');
+  console.log('🔓 Database access: collaborative (all users can write)');
 
-  console.log('📝 Opening database "intentions"...');
+  // Use a fixed global database name that all users connect to
+  const globalDatabaseName = 'syncengine-global-intentions';
 
   const database = await Promise.race([
-    orbitdb.open('intentions', {
+    orbitdb.open(globalDatabaseName, {
       type: 'documents',
       indexBy: 'intentionId',
       create: true,
       sync: true,
       accessController: IPFSAccessController({
-        write: writePermissions
+        write: ['*']  // Allow all users to write (collaborative database)
       })
     }),
     new Promise((_, reject) =>

@@ -7,6 +7,8 @@
 
   const dispatch = createEventDispatcher();
 
+  export let searchQuery = '';
+
   let mediaRecorder = null;
   let audioChunks = [];
   let recordings = [];
@@ -262,24 +264,36 @@
   }
 
   async function handleVoiceSubmit() {
-    if (recordings.length === 0) return;
+    const hasRecordings = recordings.length > 0;
+    const hasText = searchQuery?.trim().length > 0;
 
-    const totalDuration = recordings.reduce((sum, r) => sum + r.duration, 0);
+    if (!hasRecordings && !hasText) return;
 
-    // Dispatch event with recordings info
-    dispatch('submit', {
-      count: recordings.length,
-      totalDuration,
-      recordings: recordings.map((r) => ({ blob: r.blob, duration: r.duration }))
-    });
+    if (hasRecordings) {
+      const totalDuration = recordings.reduce((sum, r) => sum + r.duration, 0);
 
-    // Clear recordings
-    recordings.forEach((r) => {
-      if (r.audio) r.audio.pause();
-      if (r.audioUrl) URL.revokeObjectURL(r.audioUrl);
-    });
-    recordings = [];
-    updateVoiceSubmitState();
+      // Dispatch event with recordings info
+      dispatch('submit', {
+        type: 'voice',
+        count: recordings.length,
+        totalDuration,
+        recordings: recordings.map((r) => ({ blob: r.blob, duration: r.duration }))
+      });
+
+      // Clear recordings
+      recordings.forEach((r) => {
+        if (r.audio) r.audio.pause();
+        if (r.audioUrl) URL.revokeObjectURL(r.audioUrl);
+      });
+      recordings = [];
+      updateVoiceSubmitState();
+    } else if (hasText) {
+      // Text-only submission
+      dispatch('submit', {
+        type: 'text',
+        query: searchQuery.trim()
+      });
+    }
   }
 </script>
 
@@ -373,10 +387,10 @@
 
     <button
       class="voice-submit-btn"
-      class:active={recordings.length > 0}
+      class:active={recordings.length > 0 || (searchQuery?.trim().length > 0)}
       on:click={handleVoiceSubmit}
-      disabled={recordings.length === 0}
-      title="Submit voice search"
+      disabled={recordings.length === 0 && !searchQuery?.trim()}
+      title="Submit search"
     >
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <path d="M5 12h14" />

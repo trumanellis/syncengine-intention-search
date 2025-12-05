@@ -311,18 +311,25 @@
   }
 
   function handleVoiceSubmit(event) {
-    const { count, totalDuration } = event.detail;
-    status = `voice-${count}-recordings`;
+    const { type, count, totalDuration, query } = event.detail;
 
-    // For now, show a status message
-    // In a real app, you'd send the recordings to a transcription service
-    console.log(`Received ${count} voice recordings (${totalDuration}s total)`);
+    if (type === 'text') {
+      // Text submission - trigger search
+      handleSearch();
+    } else if (type === 'voice') {
+      // Voice recording submission
+      status = `voice-${count}-recordings`;
 
-    // You could process the recordings here and convert to search query
-    // For demo purposes, we'll just update the status
-    setTimeout(() => {
-      status = 'ready';
-    }, 2000);
+      // For now, show a status message
+      // In a real app, you'd send the recordings to a transcription service
+      console.log(`Received ${count} voice recordings (${totalDuration}s total)`);
+
+      // You could process the recordings here and convert to search query
+      // For demo purposes, we'll just update the status
+      setTimeout(() => {
+        status = 'ready';
+      }, 2000);
+    }
   }
 
   function selectIntention(intention) {
@@ -653,7 +660,7 @@
 
         <!-- Voice Interface - Fixed bottom right -->
         <div class="voice-interface-container">
-          <VoiceRecorder on:submit={handleVoiceSubmit} />
+          <VoiceRecorder bind:searchQuery on:submit={handleVoiceSubmit} />
         </div>
       </div>
     {/if}
