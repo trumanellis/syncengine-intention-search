@@ -22,3 +22,18 @@ Thumbs.db
 # Vite
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
+
+# Local data directories (OrbitDB/IPFS)
+.orbitdb/
+orbitdb/
+ipfs/
+.ipfs/
+
+# Local storage exports (if debugging)
+*.localstorage
+localStorage*.json
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
