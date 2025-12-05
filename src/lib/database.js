@@ -18,6 +18,29 @@ export function getVerificationForIntention(intentionId) {
 }
 
 /**
+ * Extracts database address from URL parameter
+ * @returns {string|null} Database address from URL or null
+ */
+export function getDatabaseAddressFromURL() {
+  if (typeof window === 'undefined') return null;
+
+  const params = new URLSearchParams(window.location.search);
+  const dbAddress = params.get('db');
+
+  if (dbAddress) {
+    console.log('📱 Magic link detected:', dbAddress);
+
+    // Clean URL (remove parameter from browser history)
+    const cleanURL = window.location.origin + window.location.pathname;
+    window.history.replaceState({}, document.title, cleanURL);
+
+    return dbAddress;
+  }
+
+  return null;
+}
+
+/**
  * Opens an Intentions database with the given OrbitDB instance and identity
  * @param {Object} orbitdb - The OrbitDB instance
  * @param {Object} identity - The WebAuthn identity
@@ -30,13 +53,48 @@ export async function openIntentionsDatabase(orbitdb, identity, identities) {
   console.log('🌍 Opening global shared database...');
   console.log('🔓 Database access: collaborative (all users can write)');
 
-  // Check if we have a stored database address
+  // Priority 1: Check URL parameter (magic link invitation)
+  const urlAddress = getDatabaseAddressFromURL();
+
+  // Priority 2: Check if we have a stored database address
   const storedAddress = localStorage.getItem('syncengine-database-address');
 
   let database;
   let isNewDatabase = false;
+  let isJoinedViaInvitation = false;
 
-  if (storedAddress) {
+  // Try URL address first (magic link invitation)
+  if (urlAddress) {
+    console.log('🎟️ Joining via magic link invitation...');
+    isJoinedViaInvitation = true;
+
+    try {
+      // Connect to the database from magic link
+      database = await Promise.race([
+        orbitdb.open(urlAddress, {
+          type: 'documents',
+          indexBy: 'intentionId',
+          sync: true
+        }),
+        new Promise((_, reject) =>
+          setTimeout(
+            () => reject(new Error('Database open timeout after 15 seconds')),
+            15000
+          )
+        )
+      ]);
+
+      // Store the database address for future use
+      localStorage.setItem('syncengine-database-address', urlAddress);
+      console.log('✅ Successfully joined via invitation!');
+    } catch (error) {
+      console.warn('⚠️ Failed to join via magic link:', error.message);
+      // Continue to try stored address or create new
+    }
+  }
+
+  // Try stored address if magic link failed or wasn't present
+  if (!database && storedAddress) {
     console.log('📍 Found stored database address:', storedAddress);
     console.log('🔗 Connecting to existing shared database...');
 
@@ -108,8 +166,9 @@ export async function openIntentionsDatabase(orbitdb, identity, identities) {
   // Set up database event listeners
   setupDatabaseEventListeners(database, ipfsInstance, identities);
 
-  // Add isNewDatabase flag to the database object so loadIntentions can use it
+  // Add flags to the database object
   database._isNewDatabase = isNewDatabase;
+  database._isJoinedViaInvitation = isJoinedViaInvitation;
 
   return database;
 }

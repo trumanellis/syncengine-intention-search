@@ -25,6 +25,7 @@
   import VoiceRecorder from './components/VoiceRecorder.svelte';
   import CreateIntentionForm from './components/CreateIntentionForm.svelte';
   import IntentionDetail from './components/IntentionDetail.svelte';
+  import InvitationPanel from './components/InvitationPanel.svelte';
 
   // Props
   export let userLocation = null; // [latitude, longitude]
@@ -37,6 +38,12 @@
   let selectedIntention = null;
   let showCreateForm = false;
   let activeIntentionId = null;
+
+  // Invitation state
+  let showInvitationPanel = false;
+  let databaseAddress = '';
+  let peerCount = 0;
+  let isJoinedViaInvitation = false;
 
   // Roller wheel state
   let searchHistory = [
@@ -72,6 +79,9 @@
   // Particles
   let particlesContainer;
 
+  // Peer count tracking interval
+  let peerCountInterval;
+
   onMount(async () => {
     await initializeApp();
     createParticles();
@@ -83,6 +93,9 @@
   });
 
   onDestroy(async () => {
+    if (peerCountInterval) {
+      clearInterval(peerCountInterval);
+    }
     if (orbitdbInstances) {
       await cleanup({ ...orbitdbInstances, database });
     }
@@ -195,6 +208,13 @@
         orbitdbInstances.identity,
         orbitdbInstances.identities
       );
+
+      // Store database info
+      databaseAddress = database.address;
+      isJoinedViaInvitation = database._isJoinedViaInvitation || false;
+
+      // Start peer count tracking
+      startPeerCountTracking();
 
       // Load existing intentions
       allIntentions = await loadIntentions(database, database._isNewDatabase);
@@ -433,9 +453,77 @@
     }
   }
 
+  function startPeerCountTracking() {
+    if (!orbitdbInstances?.libp2p) return;
+
+    // Update immediately
+    updatePeerCount();
+
+    // Update every 3 seconds
+    peerCountInterval = setInterval(() => {
+      updatePeerCount();
+    }, 3000);
+  }
+
+  function updatePeerCount() {
+    if (orbitdbInstances?.libp2p) {
+      const peers = orbitdbInstances.libp2p.getPeers();
+      peerCount = peers.length;
+    }
+  }
+
+  function handleShowInvitation() {
+    showInvitationPanel = true;
+  }
+
+  function handleCloseInvitation() {
+    showInvitationPanel = false;
+  }
+
+  async function handleLeaveDatabase() {
+    try {
+      // Clear stored database address
+      localStorage.removeItem('syncengine-database-address');
+
+      // Cleanup current connections
+      if (orbitdbInstances) {
+        await cleanup({ ...orbitdbInstances, database });
+      }
+
+      // Reset state
+      credential = null;
+      isAuthenticated = false;
+      database = null;
+      orbitdbInstances = null;
+      allIntentions = [];
+      searchResults = [];
+      databaseAddress = '';
+      peerCount = 0;
+      isJoinedViaInvitation = false;
+      showInvitationPanel = false;
+
+      // Clear intervals
+      if (peerCountInterval) {
+        clearInterval(peerCountInterval);
+      }
+
+      currentScreen = 'auth';
+      status = 'database-left';
+
+      console.log('✅ Left database successfully');
+    } catch (error) {
+      console.error('Error leaving database:', error);
+      status = 'error';
+    }
+  }
+
   async function handleLogout() {
     if (orbitdbInstances) {
       await cleanup({ ...orbitdbInstances, database });
+    }
+
+    if (peerCountInterval) {
+      clearInterval(peerCountInterval);
     }
 
     credential = null;
@@ -486,6 +574,7 @@
       'auth-required': 'authentication required',
       'auth-cancelled': 'authentication cancelled',
       'logged-out': 'logged out',
+      'database-left': 'database left',
       'error': 'error occurred',
       'voice-error': 'voice error'
     };
@@ -517,9 +606,23 @@
   <!-- Header -->
   <header class="header">
     <h1 class="logo logo-glow">Synchronicity Engine</h1>
-    <div class="status-indicator">
-      <div class="status-dot status-pulse"></div>
-      <span>{getStatusText(status)}</span>
+    <div class="header-controls">
+      {#if isAuthenticated && databaseAddress}
+        <button class="share-button" on:click={handleShowInvitation} title="Share database">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="18" cy="5" r="3" />
+            <circle cx="6" cy="12" r="3" />
+            <circle cx="18" cy="19" r="3" />
+            <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" />
+            <line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
+          </svg>
+          <span>Share</span>
+        </button>
+      {/if}
+      <div class="status-indicator">
+        <div class="status-dot status-pulse"></div>
+        <span>{getStatusText(status)}</span>
+      </div>
     </div>
   </header>
 
@@ -726,6 +829,17 @@
     {/if}
   </main>
 
+  <!-- Invitation Panel (Modal) -->
+  {#if showInvitationPanel && databaseAddress}
+    <InvitationPanel
+      {databaseAddress}
+      {peerCount}
+      {isJoinedViaInvitation}
+      on:close={handleCloseInvitation}
+      on:leave={handleLeaveDatabase}
+    />
+  {/if}
+
   <!-- Footer -->
   <footer class="footer">
     <div>v0.1.0 · intention field</div>
@@ -763,6 +877,39 @@
     letter-spacing: 0.15em;
     color: var(--white);
     margin: 0;
+  }
+
+  .header-controls {
+    display: flex;
+    align-items: center;
+    gap: 1.5rem;
+  }
+
+  .share-button {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    background: transparent;
+    border: 1px solid rgba(124, 184, 124, 0.3);
+    border-radius: 6px;
+    padding: 0.5rem 1rem;
+    font-size: 0.75rem;
+    color: var(--moss-glow);
+    font-family: var(--font-mono);
+    cursor: pointer;
+    transition: all 0.3s ease;
+    opacity: 0.8;
+  }
+
+  .share-button:hover {
+    opacity: 1;
+    background: rgba(57, 255, 20, 0.1);
+    border-color: var(--moss-glow);
+  }
+
+  .share-button svg {
+    width: 16px;
+    height: 16px;
   }
 
   .status-indicator {
@@ -1119,6 +1266,16 @@
       gap: 0.75rem;
       align-items: center;
       padding: 1.5rem;
+    }
+
+    .header-controls {
+      flex-direction: column;
+      gap: 0.75rem;
+    }
+
+    .share-button {
+      width: 100%;
+      justify-content: center;
     }
 
     .voice-interface-container {

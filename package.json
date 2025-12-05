@@ -66,6 +66,7 @@
     "helia": "^5.5.1",
     "libp2p": "^2.10.0",
     "multiformats": "^13.4.0",
+    "qrcode": "^1.5.4",
     "uint8arrays": "^5.1.0",
     "vite-plugin-node-polyfills": "^0.24.0"
   }
