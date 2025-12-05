@@ -34,6 +34,7 @@ export async function openIntentionsDatabase(orbitdb, identity, identities) {
   const storedAddress = localStorage.getItem('syncengine-database-address');
 
   let database;
+  let isNewDatabase = false;
 
   if (storedAddress) {
     console.log('📍 Found stored database address:', storedAddress);
@@ -67,6 +68,7 @@ export async function openIntentionsDatabase(orbitdb, identity, identities) {
   if (!database) {
     console.log('🆕 Creating new shared database...');
     const globalDatabaseName = 'syncengine-global-intentions';
+    isNewDatabase = true;
 
     database = await Promise.race([
       orbitdb.open(globalDatabaseName, {
@@ -96,7 +98,8 @@ export async function openIntentionsDatabase(orbitdb, identity, identities) {
     address: database.address,
     type: database.type,
     identityId: database.identity?.id,
-    accessControllerType: database.access?.type
+    accessControllerType: database.access?.type,
+    isNew: isNewDatabase
   });
 
   console.log('📋 Share this address with other devices to sync:');
@@ -104,6 +107,9 @@ export async function openIntentionsDatabase(orbitdb, identity, identities) {
 
   // Set up database event listeners
   setupDatabaseEventListeners(database, ipfsInstance, identities);
+
+  // Add isNewDatabase flag to the database object so loadIntentions can use it
+  database._isNewDatabase = isNewDatabase;
 
   return database;
 }
@@ -145,17 +151,26 @@ function setupDatabaseEventListeners(database, ipfs, identities) {
 /**
  * Loads all intentions from the database
  * @param {Object} database - The database instance
+ * @param {boolean} isNewDatabase - Whether this is a newly created database
  * @returns {Promise<Array>} Array of intention objects
  */
-export async function loadIntentions(database) {
+export async function loadIntentions(database, isNewDatabase = false) {
   if (!database) return [];
 
   try {
     console.log('📊 Loading intentions from database:', {
       databaseName: database.name,
       databaseAddress: database.address,
-      databaseType: database.type
+      databaseType: database.type,
+      isNew: isNewDatabase
     });
+
+    // For newly created databases, return empty array immediately
+    // to avoid timeout issues during initialization
+    if (isNewDatabase) {
+      console.log('🆕 New database - no intentions to load yet');
+      return [];
+    }
 
     const allIntentions = await Promise.race([
       database.all(),
@@ -177,7 +192,10 @@ export async function loadIntentions(database) {
     return intentions;
   } catch (error) {
     console.error('❌ Failed to load intentions:', error);
-    throw error;
+    // If loading fails, return empty array rather than throwing
+    // This prevents authentication from failing completely
+    console.log('⚠️ Returning empty array due to load error');
+    return [];
   }
 }
 

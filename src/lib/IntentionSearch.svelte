@@ -197,7 +197,7 @@
       );
 
       // Load existing intentions
-      allIntentions = await loadIntentions(database);
+      allIntentions = await loadIntentions(database, database._isNewDatabase);
 
       // Show dashboard immediately after authentication succeeds
       isAuthenticated = true;
